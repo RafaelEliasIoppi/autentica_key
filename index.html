@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Monitor da API com gráficos claros</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #0f1419; color: #e6ecf0; }
+    h1 { margin-bottom: 8px; }
+    input { padding: 6px; border-radius: 6px; border: 1px solid #38444d; background: #192734; color: #e6ecf0; }
+    button { padding: 8px 12px; border-radius: 6px; border: 0; background: #1da1f2; color: white; cursor: pointer; margin: 4px; }
+    pre { background: #0b131a; border: 1px solid #22303c; padding: 8px; border-radius: 6px; overflow: auto; font-size: 12px; }
+    canvas { background: #15202b; border-radius: 8px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Monitor da API</h1>
+  <p>Chave: <input id="apiKey" placeholder="minha_chave_secreta"></p>
+  <button onclick="iniciar()">▶️ Iniciar</button>
+  <button onclick="parar()">⏹️ Parar</button>
+  <button onclick="limpar()">🧹 Limpar</button>
+
+  <h2>Status:</h2>
+  <pre id="status">{}</pre>
+
+  <h2>Dados:</h2>
+  <pre id="dados">{}</pre>
+
+  <h2>Gráfico de tempo de resposta</h2>
+  <canvas id="graficoTempo" width="500" height="250"></canvas>
+
+  <h2>Gráfico de status HTTP</h2>
+  <canvas id="graficoStatus" width="500" height="200"></canvas>
+  <div>
+    🟢 200 OK &nbsp;&nbsp; 🟡 401 Unauthorized &nbsp;&nbsp; 🔴 403 Forbidden
+  </div>
+
+  <script>
+    let intervalo;
+
+    // Gráfico de tempo
+    const ctxTempo = document.getElementById('graficoTempo').getContext('2d');
+    const chartTempo = new Chart(ctxTempo, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Tempo /status', borderColor: '#1da1f2', data: [], fill: false },
+          { label: 'Tempo /dados', borderColor: '#00ff99', data: [], fill: false }
+        ]
+      },
+      options: { responsive: false, maintainAspectRatio: false }
+    });
+
+    // Gráfico de status
+    const ctxStatus = document.getElementById('graficoStatus').getContext('2d');
+    const chartStatus = new Chart(ctxStatus, {
+      type: 'scatter',
+      data: { datasets: [] },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        scales: {
+          x: { type: 'category', labels: [] },
+          y: {
+            min: 200, max: 405, ticks: { stepSize: 1 },
+            title: { display: true, text: 'Status HTTP' }
+          }
+        }
+      }
+    });
+
+    async function atualizar() {
+      const key = document.getElementById("apiKey").value;
+
+      // /status
+      const t0 = performance.now();
+      const resStatus = await fetch("/status");
+      const t1 = performance.now();
+      const dataStatus = await resStatus.json();
+
+      // /dados
+      const t2 = performance.now();
+      const resDados = await fetch("/dados", { headers: { "x-api-key": key } });
+      const t3 = performance.now();
+      const dataDados = await resDados.json();
+
+      document.getElementById("status").textContent =
+        JSON.stringify({ status: resStatus.status, body: dataStatus }, null, 2);
+      document.getElementById("dados").textContent =
+        JSON.stringify({ status: resDados.status, body: dataDados }, null, 2);
+
+      const tempoStatus = Math.round(t1 - t0);
+      const tempoDados = Math.round(t3 - t2);
+      const timestamp = new Date().toLocaleTimeString();
+
+      // Atualiza gráfico de tempo
+      chartTempo.data.labels.push(timestamp);
+      chartTempo.data.datasets[0].data.push(tempoStatus);
+      chartTempo.data.datasets[1].data.push(tempoDados);
+      chartTempo.update();
+
+      // Atualiza gráfico de status
+      chartStatus.data.labels.push(timestamp);
+      let cor = '#00ff99'; // verde
+      if (resDados.status === 401) cor = '#ffcc00'; // amarelo
+      if (resDados.status === 403) cor = '#ff3333'; // vermelho
+
+      chartStatus.data.datasets.push({
+        label: timestamp,
+        data: [{ x: timestamp, y: resDados.status }],
+        pointBackgroundColor: cor,
+        pointRadius: 6
+      });
+      chartStatus.update();
+    }
+
+    function iniciar() {
+      if (!intervalo) {
+        atualizar();
+        intervalo = setInterval(atualizar, 3000);
+      }
+    }
+
+    function parar() {
+      clearInterval(intervalo);
+      intervalo = null;
+    }
+
+    function limpar() {
+      chartTempo.data.labels = [];
+      chartTempo.data.datasets.forEach(ds => ds.data = []);
+      chartTempo.update();
+
+      chartStatus.data.labels = [];
+      chartStatus.data.datasets = [];
+      chartStatus.update();
+
+      document.getElementById("status").textContent = "{}";
+      document.getElementById("dados").textContent = "{}";
+    }
+  </script>
+</body>
+</html>
